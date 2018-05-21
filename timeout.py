@@ -1,6 +1,7 @@
 import time
 import multiprocessing
 import logging
+import functools
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
@@ -36,6 +37,7 @@ def timeout(seconds, force_kill=True):
     Courtesy of http://code.activestate.com/recipes/577853-timeout-decorator-with-multiprocessing/
     '''
     def wrapper(function):
+        @functools.wraps(function)
         def inner(*args, **kwargs):
             now = time.time()
             proc = RunnableProcessing(function, *args, **kwargs)

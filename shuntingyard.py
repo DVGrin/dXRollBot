@@ -5,6 +5,7 @@ import random
 import math
 import re
 import logging
+import functools
 
 import timeout
 
@@ -151,7 +152,7 @@ class RolledDice:
     __pow__, __rpow__ = __operators(operator.pow)
 
 
-def keep(roll, number, highest=True):
+def keep(roll, number, *, highest=True):
     logger.debug("Trying to keep %s highest (%s) rolls for %s", int(number), highest, roll)
     if (type(roll) != RolledDice):
         logger.debug("Raised KeepValueError for value '%s', not a roll", roll)
@@ -179,12 +180,8 @@ def keep(roll, number, highest=True):
         return roll
 
 
-def keep_highest(roll, number):
-    return keep(roll, number, highest=True)
-
-
-def keep_lowest(roll, number):
-    return keep(roll, number, highest=False)
+keep_highest = functools.partial(keep, highest=True)
+keep_lowest = functools.partial(keep, highest=False)
 
 
 def drop_highest(roll, number):
@@ -303,7 +300,7 @@ class ExpressionEvaluation:
         values.append(self.functions[function](arg))
 
     def __greater_precedence(self, op1, op2):
-        return self.operators[op1].priority > self.operators[op2].priority
+        return self.operators[op1].priority >= self.operators[op2].priority
 
     def __preprocess_expression(self, expression):
         expression = re.compile("\s").sub("", expression)
