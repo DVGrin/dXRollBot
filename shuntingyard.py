@@ -37,6 +37,10 @@ class MismatchedBrackets(Exception):
     '''There was a mismatched bracket'''
 
 
+class EmptyExpression(Exception):
+    '''The expression given was empty'''
+
+
 class RolledDice:
     '''Class that simulates a dice roll and holds all the information about it to allow arithmetics'''
     def __init__(self, number, sides, rolls=None, dropped_rolls=None, additional_rolls=None, sum=None):
@@ -244,18 +248,14 @@ class ExpressionEvaluation:
         self.result = None
         seconds_to_timeout = 1
         try:
-            self.result = round(timeout.evaluate(seconds_to_timeout, self.__evaluate, expression), 3)
+            self.result = timeout.evaluate(seconds_to_timeout, self.__evaluate, expression)
             logger.info("The result of evaluation: %s", self.result)
-            # self.result = round(self.__evaluate(expression), 3)
             if isinstance(self.result, RolledDice):
                 logger.info("Rolls made: %s", self.result.rolls)
                 logger.info("Rolls dropped: %s", self.result.dropped_rolls)
                 logger.info("Additional rolls made: %s", self.result.additional_rolls)
-            # self.result = float(self.result)
-            # if self.result == int(self.result):
-            #     self.result = int(self.result)
         except Exception as e:
-            logger.warning("Raised exception %r for expression '%s'", e, expression)
+            logger.info("Raised exception %r for expression '%s'", e, expression)
             raise e
 
     def __is_operand(self, token):
@@ -342,6 +342,8 @@ class ExpressionEvaluation:
         expression = self.__preprocess_expression(expression)
         tokens = self.__divide_expression(expression)
         values, operators = deque(), deque()
+        if not tokens:
+            raise EmptyExpression
         for token in tokens:
             if self.__is_operand(token):
                 try:
