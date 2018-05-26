@@ -43,17 +43,18 @@ class EmptyExpression(Exception):
 
 class RolledDice:
     '''Class that simulates a dice roll and holds all the information about it to allow arithmetics'''
-    def __init__(self, number, sides, rolls=None, dropped_rolls=None, additional_rolls=None, sum=None):
-        logger.debug("Created RolledDice(number=%s, sides=%s, rolls=%s, dropped_rolls=%s, additional_rolls=%s, sum=%s) instance", number, sides, rolls, dropped_rolls, additional_rolls, sum)
+    def __init__(self, number, sides):
+        logger.debug("Created RolledDice(number=%s, sides=%s) instance", number, sides)
+        self.rolls, self.dropped_rolls, self.additional_rolls = [], [], []
         if (isinstance(number, RolledDice)):
-            rolls = number.rolls
-            dropped_rolls = number.dropped_rolls
-            additional_rolls = number.additional_rolls
+            self.rolls += number.rolls
+            self.dropped_rolls += number.dropped_rolls
+            self.additional_rolls += number.additional_rolls
         self.number = int(number)
         if (isinstance(sides, RolledDice)):
-            rolls = sides.rolls
-            dropped_rolls = sides.dropped_rolls
-            additional_rolls = sides.additional_rolls
+            self.rolls += sides.rolls
+            self.dropped_rolls += sides.dropped_rolls
+            self.additional_rolls += sides.additional_rolls
         self.sides = sides
         if self.sides != "F":
             self.sides = int(sides)
@@ -63,14 +64,11 @@ class RolledDice:
         if (self.number < 0):
             logger.debug("Raised NegativeRollMeasurements exception, number of dice = %s", self.number)
             raise NegativeRollMeasurements(f"Cannot roll negative number of dice: {self.number}")
-        self.rolls = self.__default_argument(rolls, [])
-        self.dropped_rolls = self.__default_argument(dropped_rolls, [])
-        self.additional_rolls = self.__default_argument(additional_rolls, [])
-        self.sum = self.__default_argument(sum, self.__roll_dice())
-        logger.debug("Initialized RolledDice(number=%s, sides=%s, rolls=%s, dropped_rolls=%s, additional_rolls=%s, sum=%s) instance", self.number, self.sides, self.rolls, self.dropped_rolls, self.additional_rolls, self.sum)
+        self.sum = self.__roll_dice()
+        logger.debug("Initialized RolledDice(number=%s, sides=%s, rolls=%s, sum=%s) instance", self.number, self.sides, self.rolls, self.sum)
 
-    def __repr__(self):
-        return f"RolledDice({self.number}, " + repr(self.sides) + f", {self.rolls}, {self.dropped_rolls}, {self.additional_rolls}, {self.sum})"
+#    def __repr__(self):
+#        return f"RolledDice({self.number}, " + repr(self.sides) + f", {self.rolls}, {self.dropped_rolls}, {self.additional_rolls}, {self.sum})"
 
     def __str__(self):
         return f"{self.number}d{self.sides}({self.sum})"
@@ -89,12 +87,6 @@ class RolledDice:
         for roll in self.rolls[-1]:
             sum += roll
         return sum
-
-    def __default_argument(self, arg, default):
-        if arg:
-            return arg
-        else:
-            return default
 
     def __operators(operator):
         def _add_lists(me, other):
