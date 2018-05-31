@@ -3,6 +3,7 @@ import pytest
 
 tested = shuntingyard.ExpressionEvaluation
 
+
 class TestClass(object):
     '''Test class for Shunting Yard algorithm and dXRollBot'''
     def test_arithmetic(self):
@@ -10,7 +11,7 @@ class TestClass(object):
 
     def test_arithmetic_2(self):
         result = tested("(2^3 + 2) % 4 / 3 + 7d13").result
-        assert float(result) == 0.667 + sum(result.rolls[0])
+        assert round(float(result), 3) == 0.667 + sum(result.rolls[0])
 
     def test_arithmetic_3(self):
         assert float(tested("(5d1 + 3) / 2 ^ 2 + 0d0").result) == 2
@@ -61,7 +62,7 @@ class TestClass(object):
     def test_empty_stack(self):
         with pytest.raises(shuntingyard.StackIsEmpty):
             tested("2d6+")
-                
+
     def test_empty_stack_2(self):
         with pytest.raises(shuntingyard.StackIsEmpty):
             tested("-")

@@ -7,7 +7,7 @@ import re
 import logging
 import functools
 
-import timeout
+# import timeout
 
 '''
 TODO: Legality checks, line ~310
@@ -44,20 +44,20 @@ class EmptyExpression(Exception):
 class RolledDice:
     '''Class that simulates a dice roll and holds all the information about it to allow arithmetics'''
     def __init__(self, number, sides):
-        logger.debug("Created RolledDice(number=%s, sides=%s) instance", number, sides)
+        logger.debug("Created %s(number=%s, sides=%s) instance", type(self).__name__, number, sides)
         self.rolls, self.dropped_rolls, self.additional_rolls = [], [], []
         if (isinstance(number, RolledDice)):
             self.rolls += number.rolls
             self.dropped_rolls += number.dropped_rolls
             self.additional_rolls += number.additional_rolls
-        self.number = int(number)
+        self.__number = int(number)
         if (isinstance(sides, RolledDice)):
             self.rolls += sides.rolls
             self.dropped_rolls += sides.dropped_rolls
             self.additional_rolls += sides.additional_rolls
-        self.sides = sides
+        self.__sides = sides
         if self.sides != "F":
-            self.sides = int(sides)
+            self.__sides = int(sides)
         if (self.sides != "F" and self.sides < 0):
             logger.debug("Raised NegativeRollMeasurements exception, sides = %s", self.sides)
             raise NegativeRollMeasurements(f"Cannot roll dice with negative number of sides: {self.sides}")
@@ -65,10 +65,18 @@ class RolledDice:
             logger.debug("Raised NegativeRollMeasurements exception, number of dice = %s", self.number)
             raise NegativeRollMeasurements(f"Cannot roll negative number of dice: {self.number}")
         self.sum = self.__roll_dice()
-        logger.debug("Initialized RolledDice(number=%s, sides=%s, rolls=%s, sum=%s) instance", self.number, self.sides, self.rolls, self.sum)
+        logger.debug("Initialized %s(number=%s, sides=%s, rolls=%s, sum=%s) instance", type(self).__name__, self.number, self.sides, self.rolls, self.sum)
+
+    @property
+    def number(self):
+        return self.__number
+
+    @property
+    def sides(self):
+        return self.__sides
 
 #    def __repr__(self):
-#        return f"RolledDice({self.number}, " + repr(self.sides) + f", {self.rolls}, {self.dropped_rolls}, {self.additional_rolls}, {self.sum})"
+#        return f"{type(self).__name__}({self.number}, " + repr(self.sides) + f", {self.rolls}, {self.dropped_rolls}, {self.additional_rolls}, {self.sum})"
 
     def __str__(self):
         return f"{self.number}d{self.sides}({self.sum})"
@@ -88,7 +96,7 @@ class RolledDice:
             sum += roll
         return sum
 
-    def __operators(operator):
+    def __operators(oper):
         def _add_lists(me, other):
             if(isinstance(other, RolledDice)):
                 me.rolls += other.rolls
@@ -97,25 +105,25 @@ class RolledDice:
 
         def forward(me, other):
             if(isinstance(other, Real)):
-                me.sum = operator(me.sum, other)
+                me.sum = oper(me.sum, other)
                 return me
             elif(isinstance(other, RolledDice)):
-                me.sum = operator(me.sum, other.sum)
+                me.sum = oper(me.sum, other.sum)
                 _add_lists(me, other)
                 return me
             else:
                 return NotImplemented
-        forward.__name__ = '__' + operator.__name__ + '__'
-        forward.__doc__ = f"Implementation of operator {operator} for RolledDice class"
+        forward.__name__ = '__' + oper.__name__ + '__'
+        forward.__doc__ = f"Implementation of operator {oper} for RolledDice class"
 
         def reverse(me, other):
             if(isinstance(other, Real)):
-                me.sum = operator(other, me.sum)
+                me.sum = oper(other, me.sum)
                 return me
             else:
                 return NotImplemented
-        reverse.__name__ = '__' + operator.__name__ + '__'
-        reverse.__doc__ = f"Implementation of reverse operator {operator} for RolledDice class"
+        reverse.__name__ = '__' + oper.__name__ + '__'
+        reverse.__doc__ = f"Implementation of reverse operator {oper} for RolledDice class"
         return forward, reverse
 
     def __int__(self):
@@ -147,45 +155,45 @@ class RolledDice:
     __mod__, __rmod__ = __operators(operator.mod)
     __pow__, __rpow__ = __operators(operator.pow)
 
-
-def keep(roll, number, *, highest=True):
-    logger.debug("Trying to keep %s highest (%s) rolls for %s", int(number), highest, roll)
-    if (type(roll) != RolledDice):
-        logger.debug("Raised KeepValueError for value '%s', not a roll", roll)
-        raise KeepValueError(f"Cannot keep/drop something that is not a roll: {roll}")
-    else:
-        number = int(number)
-        if ((0 > number) or (number > len(roll.rolls[-1]))):
-            logger.debug("Raised KeepValueError for trying to keep (%s) rolls out of (%s)", number, len(roll.rolls[0]))
-            raise KeepValueError(f"Number of dice to keep/drop ({number}) has to be positive and less than number of rolls ({len(roll.rolls[0])})")
+    @staticmethod
+    def keep(roll, number, *, highest=True):
+        logger.debug("Trying to keep %s highest (%s) rolls for %s", int(number), highest, roll)
+        if (type(roll) != RolledDice):
+            logger.debug("Raised KeepValueError for value '%s', not a roll", roll)
+            raise KeepValueError(f"Cannot keep/drop something that is not a roll: {roll}")
         else:
-            logger.debug("Rolls before dropping: %s", roll.rolls)
-            to_remove = roll.rolls[-1]
-            print(f"number = {number}, len = {len(roll.rolls[-1])}")
-            to_remove.sort()
-            if highest:
-                to_remove = to_remove[:len(roll.rolls[-1]) - number]
+            number = int(number)
+            if ((0 > number) or (number > len(roll.rolls[-1]))):
+                logger.debug("Raised KeepValueError for trying to keep (%s) rolls out of (%s)", number, len(roll.rolls[0]))
+                raise KeepValueError(f"Number of dice to keep/drop ({number}) has to be positive and less than number of rolls ({len(roll.rolls[0])})")
             else:
-                to_remove = to_remove[number:]
-            for element in to_remove:
-                roll.dropped_rolls[-1].append(element)
-                roll.rolls[-1].remove(element)
-                roll.sum -= element
-            logger.debug("Rolls after dropping: %s", roll.rolls)
-        logger.debug("Result of keeping: %s", roll)
-        return roll
+                logger.debug("Rolls before dropping: %s", roll.rolls)
+                to_remove = roll.rolls[-1]
+                print(f"number = {number}, len = {len(roll.rolls[-1])}")
+                to_remove.sort()
+                if highest:
+                    to_remove = to_remove[:len(roll.rolls[-1]) - number]
+                else:
+                    to_remove = to_remove[number:]
+                for element in to_remove:
+                    roll.dropped_rolls[-1].append(element)
+                    roll.rolls[-1].remove(element)
+                    roll.sum -= element
+                logger.debug("Rolls after dropping: %s", roll.rolls)
+            logger.debug("Result of keeping: %s", roll)
+            return roll
 
 
-keep_highest = functools.partial(keep, highest=True)
-keep_lowest = functools.partial(keep, highest=False)
+keep_highest = functools.partial(RolledDice.keep, highest=True)
+keep_lowest = functools.partial(RolledDice.keep, highest=False)
 
 
 def drop_highest(roll, number):
-    return keep(roll, len(roll.rolls[0]) - number, highest=False)
+    return RolledDice.keep(roll, len(roll.rolls[0]) - number, highest=False)
 
 
 def drop_lowest(roll, number):
-    return keep(roll, len(roll.rolls[0]) - number, highest=True)
+    return RolledDice.keep(roll, len(roll.rolls[0]) - number, highest=True)
 
 
 class Operator:
@@ -238,9 +246,10 @@ class ExpressionEvaluation:
         for oper in self.roll_modifiers:
             self.operators[oper] = self.roll_modifiers[oper]
         self.result = None
-        seconds_to_timeout = 1
+        # seconds_to_timeout = 1
         try:
-            self.result = timeout.evaluate(seconds_to_timeout, self.__evaluate, expression)
+            # self.result = timeout.evaluate(seconds_to_timeout, self.__evaluate, expression)
+            self.result = self.__evaluate(expression)
             logger.info("The result of evaluation: %s", self.result)
             if isinstance(self.result, RolledDice):
                 logger.info("Rolls made: %s", self.result.rolls)
