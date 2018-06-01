@@ -9,10 +9,6 @@ import functools
 
 # import timeout
 
-'''
-TODO: Legality checks, line ~310
-'''
-
 logging.basicConfig(format="%(levelname)-8s (%(asctime)s) %(message)s", level=logging.DEBUG, datefmt="%d.%m.%y, %H:%M:%S")
 logger = logging.getLogger(__name__)
 
@@ -30,7 +26,7 @@ class NegativeRollMeasurements(Exception):
 
 
 class KeepValueError(Exception):
-    '''The user either tried to keep something that is not a roll or the number of dice to keep was wrong'''
+    '''The number of dice to keep was wrong'''
 
 
 class MismatchedBrackets(Exception):
@@ -39,6 +35,10 @@ class MismatchedBrackets(Exception):
 
 class EmptyExpression(Exception):
     '''The expression given was empty'''
+
+
+class RollModifierMisuse(Exception):
+    '''The user tried to apply roll modifier to something that is not a roll'''
 
 
 class RolledDice:
@@ -65,6 +65,7 @@ class RolledDice:
             logger.debug("Raised NegativeRollMeasurements exception, number of dice = %s", self.number)
             raise NegativeRollMeasurements(f"Cannot roll negative number of dice: {self.number}")
         self.sum = self.__roll_dice()
+        self.__finished = False
         logger.debug("Initialized %s(number=%s, sides=%s, rolls=%s, sum=%s) instance", type(self).__name__, self.number, self.sides, self.rolls, self.sum)
 
     @property
@@ -74,6 +75,14 @@ class RolledDice:
     @property
     def sides(self):
         return self.__sides
+
+    @property
+    def finished(self):
+        return self.__finished
+
+    def set_finished(self, value):
+        if isinstance(value, bool):
+            self.__finished = value
 
 #    def __repr__(self):
 #        return f"{type(self).__name__}({self.number}, " + repr(self.sides) + f", {self.rolls}, {self.dropped_rolls}, {self.additional_rolls}, {self.sum})"
@@ -85,16 +94,12 @@ class RolledDice:
         self.rolls.append([])
         self.dropped_rolls.append([])
         self.additional_rolls.append([])
-        sum = 0
-        for i in range(0, self.number):
-            if self.sides == "F":
-                roll = random.randint(-1, 1)
-            else:
-                roll = random.randint(1, self.sides)
-            self.rolls[-1].append(roll)
-        for roll in self.rolls[-1]:
-            sum += roll
-        return sum
+        if self.sides == "F":
+            self.rolls[-1] = [random.randint(-1, 1) for i in range(self.number)]
+        else:
+            self.rolls[-1] = [random.randint(1, self.sides) for i in range(self.number)]
+        result = sum(self.rolls[-1])
+        return result
 
     def __operators(oper):
         def _add_lists(me, other):
@@ -158,30 +163,25 @@ class RolledDice:
     @staticmethod
     def keep(roll, number, *, highest=True):
         logger.debug("Trying to keep %s highest (%s) rolls for %s", int(number), highest, roll)
-        if (type(roll) != RolledDice):
-            logger.debug("Raised KeepValueError for value '%s', not a roll", roll)
-            raise KeepValueError(f"Cannot keep/drop something that is not a roll: {roll}")
+        number = int(number)
+        if ((0 > number) or (number > len(roll.rolls[-1]))):
+            logger.debug("Raised KeepValueError for trying to keep (%s) rolls out of (%s)", number, len(roll.rolls[0]))
+            raise KeepValueError(f"Number of dice to keep/drop ({number}) has to be positive and less than number of rolls ({len(roll.rolls[0])})")
         else:
-            number = int(number)
-            if ((0 > number) or (number > len(roll.rolls[-1]))):
-                logger.debug("Raised KeepValueError for trying to keep (%s) rolls out of (%s)", number, len(roll.rolls[0]))
-                raise KeepValueError(f"Number of dice to keep/drop ({number}) has to be positive and less than number of rolls ({len(roll.rolls[0])})")
+            logger.debug("Rolls before dropping: %s", roll.rolls)
+            to_remove = roll.rolls[-1]
+            to_remove.sort()
+            if highest:
+                to_remove = to_remove[:len(roll.rolls[-1]) - number]
             else:
-                logger.debug("Rolls before dropping: %s", roll.rolls)
-                to_remove = roll.rolls[-1]
-                print(f"number = {number}, len = {len(roll.rolls[-1])}")
-                to_remove.sort()
-                if highest:
-                    to_remove = to_remove[:len(roll.rolls[-1]) - number]
-                else:
-                    to_remove = to_remove[number:]
-                for element in to_remove:
-                    roll.dropped_rolls[-1].append(element)
-                    roll.rolls[-1].remove(element)
-                    roll.sum -= element
-                logger.debug("Rolls after dropping: %s", roll.rolls)
-            logger.debug("Result of keeping: %s", roll)
-            return roll
+                to_remove = to_remove[number:]
+            for element in to_remove:
+                roll.dropped_rolls[-1].append(element)
+                roll.rolls[-1].remove(element)
+                roll.sum -= element
+            logger.debug("Rolls after dropping: %s", roll.rolls)
+        logger.debug("Result of keeping: %s", roll)
+        return roll
 
 
 keep_highest = functools.partial(RolledDice.keep, highest=True)
@@ -248,8 +248,8 @@ class ExpressionEvaluation:
         self.result = None
         # seconds_to_timeout = 1
         try:
-            # self.result = timeout.evaluate(seconds_to_timeout, self.__evaluate, expression)
-            self.result = self.__evaluate(expression)
+            # self.result = timeout.evaluate(seconds_to_timeout, self._evaluate, expression)
+            self.result = self._evaluate(expression)
             logger.info("The result of evaluation: %s", self.result)
             if isinstance(self.result, RolledDice):
                 logger.info("Rolls made: %s", self.result.rolls)
@@ -259,7 +259,7 @@ class ExpressionEvaluation:
             logger.info("Raised exception %r for expression '%s'", e, expression)
             raise e
 
-    def __is_operand(self, token):
+    def _is_operand(self, token):
         try:
             if token == "F":
                 return True
@@ -268,52 +268,62 @@ class ExpressionEvaluation:
         except ValueError:
             return False
 
-    def __peek(self, stack):
+    def _peek(self, stack):
         return stack[-1] if stack else None
 
-    def __apply_operator(self, operators, values):
+    def _roll_modifier_legality(self, oper, value):
+        if oper in self.roll_modifiers:
+            if not isinstance(value, RolledDice) or value.finished is True:
+                logger.debug("Raised RollModifierMisuse exception while applying roll modifier '%s' to non-roll value '%s'", oper, value)
+                raise RollModifierMisuse(f"Tried to apply roll modifier to something that is not a roll: {value}")
+        elif isinstance(value, RolledDice):
+            value.set_finished(True)
+            logger.debug("Changed finished attribute to %s", value.finished)
+
+    def _apply_operator(self, operators, values):
         oper = operators.pop()
-        if (self.__peek(values) is None):
-            logger.debug(f"Raised StackIsEmpty exception for values while applying operator '{oper}', stack: {values}")
+        if (self._peek(values) is None):
+            logger.debug("Raised StackIsEmpty exception for values while applying operator '%s', stack: %s", oper, values)
             raise StackIsEmpty(oper)
         right = values.pop()
         if oper not in self.operators:
             logger.critical("Trying to apply unknown operator '%s'", oper)
             raise ValueError(f"Unknown operator: {oper}")
         if self.operators[oper].operands == 2:
-            if (self.__peek(values) is None):
-                logger.debug(f"Raised StackIsEmpty exception for values while applying operator '{oper}', stack: {values}")
+            if (self._peek(values) is None):
+                logger.debug("Raised StackIsEmpty exception for values while applying operator '%s', stack: %s", oper, values)
                 raise StackIsEmpty(oper)
             left = values.pop()
+            self._roll_modifier_legality(oper, left)
             logger.debug("Applying operator '%s' to values (%s, %s)", oper, left, right)
             values.append(self.operators[oper].operation(left, right))
         elif self.operators[oper].operands == 1:
+            self._roll_modifier_legality(oper, right)
             logger.debug("Applying operator '%s' to value %s", oper, right)
             values.append(self.operators[oper].operation(right))
         else:
             logger.critical("Raised ValueError exception for operator %s with %s operands", oper, oper.operands)
             raise ValueError(f"The operator {oper} had {oper.operands} operands")
 
-    def __apply_function(self, operators, values):
+    def _apply_function(self, operators, values):
         function = operators.pop()
         arg = values.pop()
         logger.debug("Applying function '%s' to argument %s", function, arg)
         values.append(self.functions[function](arg))
 
-    def __greater_precedence(self, op1, op2):
+    def _greater_precedence(self, op1, op2):
         return self.operators[op1].priority >= self.operators[op2].priority
 
-    def __preprocess_expression(self, expression):
+    def _preprocess_expression(self, expression):
         expression = re.compile("\s").sub("", expression)
         expression = re.compile("\*\*").sub("^", expression)
         expression = re.compile("(?![a-zA-Z])(.)k(?=[0-9(])").sub(r"\1kh", expression)
         expression = re.compile("d%").sub("d100", expression)
         expression = re.compile("((?=[^)0-9F]).|\A)\-").sub(r"\1_", expression)
-        # TODO: Legality checks!
         logger.debug("Preprocessed expression: %s", expression)
         return expression
 
-    def __divide_expression(self, expression):
+    def _divide_expression(self, expression):
         func_tokens, op_tokens, tokens = '(', '', []
         for function in self.functions:
             func_tokens += function + '|'
@@ -339,14 +349,14 @@ class ExpressionEvaluation:
         logger.debug("Divided expression: %s", tokens)
         return tokens
 
-    def __evaluate(self, expression):
-        expression = self.__preprocess_expression(expression)
-        tokens = self.__divide_expression(expression)
+    def _evaluate(self, expression):
+        expression = self._preprocess_expression(expression)
+        tokens = self._divide_expression(expression)
         values, operators = deque(), deque()
         if not tokens:
             raise EmptyExpression
         for token in tokens:
-            if self.__is_operand(token):
+            if self._is_operand(token):
                 try:
                     values.append(float(token))
                 except ValueError:
@@ -360,36 +370,36 @@ class ExpressionEvaluation:
                 logger.debug("Added '%s' to stack: %s", token, operators)
             elif token == ')':
                 logger.debug("Found the closing bracket. Operator stack is %s", operators)
-                top = self.__peek(operators)
+                top = self._peek(operators)
                 while top is not None and top != '(':
-                    self.__apply_operator(operators, values)
-                    top = self.__peek(operators)
+                    self._apply_operator(operators, values)
+                    top = self._peek(operators)
                 if top is None:
                     logger.debug("There was a mismatched closing bracket. Raised MismatchedBrackets exception")
                     raise MismatchedBrackets
                 else:
                     operators.pop()  # Discard the '('
                     logger.debug("Discarded opening bracket")
-                    if self.__peek(operators) in self.functions:
-                        self.__apply_function(operators, values)
+                    if self._peek(operators) in self.functions:
+                        self._apply_function(operators, values)
                 logger.debug("Finished closing bracket handling. Values: %s, Operators: %s", values, operators)
             elif token in self.operators:  # Operator or roll modifier
                 logger.debug("Met an operator: '%s'", token)
-                top = self.__peek(operators)
-                while top is not None and top not in "()" and self.__greater_precedence(top, token):
-                    self.__apply_operator(operators, values)
-                    top = self.__peek(operators)
+                top = self._peek(operators)
+                while top is not None and top not in "()" and self._greater_precedence(top, token):
+                    self._apply_operator(operators, values)
+                    top = self._peek(operators)
                 operators.append(token)
                 logger.debug("Added operator '%s' to operator stack: %s", token, operators)
             else:
                 logger.debug("Raised UnknownSymbol('%s') exception", token)
                 raise UnknownSymbol(token)
-        while self.__peek(operators) is not None:
-            if self.__peek(operators) == '(':
+        while self._peek(operators) is not None:
+            if self._peek(operators) == '(':
                 logger.debug("There was a mismatched opening bracket. Raised MismatchedBrackets exception")
                 raise MismatchedBrackets
             else:
-                self.__apply_operator(operators, values)
+                self._apply_operator(operators, values)
         return values[0]
 
 

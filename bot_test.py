@@ -76,7 +76,7 @@ class TestClass(object):
             tested("2d(2-3)")
 
     def test_keep_drop_error(self):
-        with pytest.raises(shuntingyard.KeepValueError):
+        with pytest.raises(shuntingyard.RollModifierMisuse):
             tested("5kl2")
 
     def test_keep_drop_error_2(self):
@@ -106,3 +106,7 @@ class TestClass(object):
     def test_function_for_dice_3(self):
         result = tested("round(6dF + 0.3)").result
         assert float(result) == sum(result.rolls[0])
+
+    def test_roll_modifier_misuse(self):
+        with pytest.raises(shuntingyard.RollModifierMisuse):
+            tested("(3d6+2)k2")
