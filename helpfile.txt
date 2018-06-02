@@ -1,0 +1,48 @@
+This bot allows you to roll dice in Telegram chat
+To roll some dice, type in `/r` or `/roll`, followed by your formula
+For example, to roll two 6-sided dice and add 5, type `/r 2d6 + 5`
+You can string multiple rolls together, for example, `/r 3d6 + d8`
+After the roll is performed, the bot will send the result to your chat
+The bot features support for wide variety of dice mechanics
+For more information on available roll types, type `/help roll`
+[roll]
+This bot supports different roll types. XdY rolls X dice with Y sides per die
+It can perform simple rolls like `2d6 * d8`, or even math-only rolls like `5+3.7`
+It supports basic arithmetic operators: `+`, `-`, `*` and `/`
+In addition, you can use `%` (modulus division) and `^` or `**` (exponentiation).
+You can use parentheses (`(` and `)`) to modify the order of operations
+You also have access for a few mathematical functions: `floor`, `round`, `ceil` and `abs`
+For more information on functions, type `/help functions`
+You can also use roll modifiers to change the behaviour of dice rolls
+For more information on roll modifiers, type `/help modifiers`
+Note that the bot also supports Fate/Fudge dice, which have 3 sides with values `-1`, `0` and `1`
+To roll *N* Fate dice, type NdF
+[functions]
+`floor(X)` gives you the largest integer that is less or equals to X
+`ceil(X)` gives you the smallest integer that is more or equals to X
+`round(X)` rounds X to the nearest whole number
+`abs(X)` returns the absolute value of X
+[modifiers]
+You can add `khN/klN/dhN/dlN` to the roll to keep or drop N highest/lowest rolls
+For more information on that, type `/help keep`
+You can add `r[><=]` or `ro[><=]` to reroll some of the dice values
+For more information on that, type `/help reroll`
+[keep]
+You can keep (or drop) a certain number of your highest/lowest rolls
+To do that, add `khN/klN/dhN/dlN` after your roll
+Here `k` stands for keeping N rolls while `d` stands for dropping N rolls
+You can use parameter `h/l` to specify keeping highest (`h`) or lowest (`l`) rolls
+You can also omit this parameter for keeping N highest rolls: `kN`
+Example rolls:
+`8d8k4` - roll eight d8's, keep 4 highest rolls
+`10d6dl3` - roll ten d6's, drop 3 lowest rolls
+[reroll]
+You can reroll dice values of your choosing
+To do that, add `r=N/r<N/r>N` after your roll
+This will reroll any dice that are equal, less or more that N, respectively
+By default dice will reroll until all dice are within the specified parameters
+You can specify an optional parameter `o` which tells to reroll each die only once regardless of outcome
+Example rolls:
+`6d6r1` - roll six d6's, reroll any time a 1 is rolled
+`10d8r>5` - roll ten d8's, reroll any time 6 or higher is rolled
+`4d7ro<3` - roll four d7's, reroll anything less than 3 once

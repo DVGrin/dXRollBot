@@ -54,14 +54,14 @@ class RolledDice:
             self.rolls += number.rolls
             self.dropped_rolls += number.dropped_rolls
             self.additional_rolls += number.additional_rolls
-        self.__number = int(number)
+        self.__number = round(number)
         if (isinstance(sides, RolledDice)):
             self.rolls += sides.rolls
             self.dropped_rolls += sides.dropped_rolls
             self.additional_rolls += sides.additional_rolls
         self.__sides = sides
         if self.sides != "F":
-            self.__sides = int(sides)
+            self.__sides = round(sides)
         if (self.sides != "F" and self.sides < 0):
             logger.debug("Raised NegativeRollMeasurements exception, sides = %s", self.sides)
             raise NegativeRollMeasurements(f"Cannot roll dice with negative number of sides: {self.sides}")
