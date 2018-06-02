@@ -29,6 +29,10 @@ class KeepValueError(Exception):
     '''The number of dice to keep was wrong'''
 
 
+class RerollValueError(Exception):
+    '''The target number for reroll was wrong'''
+
+
 class MismatchedBrackets(Exception):
     '''There was a mismatched bracket'''
 
@@ -64,7 +68,7 @@ class RolledDice:
         if (self.number < 0):
             logger.debug("Raised NegativeRollMeasurements exception, number of dice = %s", self.number)
             raise NegativeRollMeasurements(f"Cannot roll negative number of dice: {self.number}")
-        self.sum = self.__roll_dice()
+        self.sum = self._roll_dice()
         self.__finished = False
         logger.debug("Initialized %s(number=%s, sides=%s, rolls=%s, sum=%s) instance", type(self).__name__, self.number, self.sides, self.rolls, self.sum)
 
@@ -90,7 +94,7 @@ class RolledDice:
     def __str__(self):
         return f"{self.number}d{self.sides}({self.sum})"
 
-    def __roll_dice(self):
+    def _roll_dice(self):
         self.rolls.append([])
         self.dropped_rolls.append([])
         self.additional_rolls.append([])
@@ -101,7 +105,7 @@ class RolledDice:
         result = sum(self.rolls[-1])
         return result
 
-    def __operators(oper):
+    def _operators(oper):
         def _add_lists(me, other):
             if(isinstance(other, RolledDice)):
                 me.rolls += other.rolls
@@ -153,17 +157,21 @@ class RolledDice:
         self.sum = math.ceil(self.sum)
         return self
 
-    __add__, __radd__ = __operators(operator.add)
-    __sub__, __rsub__ = __operators(operator.sub)
-    __mul__, __rmul__ = __operators(operator.mul)
-    __truediv__, __rtruediv__ = __operators(operator.truediv)
-    __mod__, __rmod__ = __operators(operator.mod)
-    __pow__, __rpow__ = __operators(operator.pow)
+    __add__, __radd__ = _operators(operator.add)
+    __sub__, __rsub__ = _operators(operator.sub)
+    __mul__, __rmul__ = _operators(operator.mul)
+    __truediv__, __rtruediv__ = _operators(operator.truediv)
+    __mod__, __rmod__ = _operators(operator.mod)
+    __pow__, __rpow__ = _operators(operator.pow)
 
     @staticmethod
     def keep(roll, number, *, highest=True):
         logger.debug("Trying to keep %s highest (%s) rolls for %s", int(number), highest, roll)
-        number = int(number)
+        try:
+            number = int(number)
+        except ValueError:
+            logger.debug("Raised KeepValueError: couldn't convert %s to int", number)
+            raise KeepValueError(f"Number of dice to keep/drop ({number}) has to be a number")
         if ((0 > number) or (number > len(roll.rolls[-1]))):
             logger.debug("Raised KeepValueError for trying to keep (%s) rolls out of (%s)", number, len(roll.rolls[0]))
             raise KeepValueError(f"Number of dice to keep/drop ({number}) has to be positive and less than number of rolls ({len(roll.rolls[0])})")
@@ -183,17 +191,51 @@ class RolledDice:
         logger.debug("Result of keeping: %s", roll)
         return roll
 
+    @staticmethod
+    def reroll(roll, target, *, relation, once=False):
+        def reroll_die(die, sides):
+            if sides == "F":
+                return random.randint(-1, 1)
+            else:
+                return random.randint(1, sides)
+
+        logger.debug("Rerolling all dice in %s that are %s%s, once (%s)", roll, relation, target, once)
+        try:
+            target = int(target)
+        except ValueError:
+            logger.debug("Raised RerollValueError: couldn't convert %s to int", target)
+            raise RerollValueError(f"Number of dice to reroll ({target}) has to be a number")
+        logger.debug("Rolls before rerolling: %s", roll.rolls)
+        relations = {">": operator.gt, "<": operator.lt, "=": operator.eq}
+        new_rolls = []
+        for value in roll.rolls[-1]:
+            while relations[relation](value, target):
+                value = reroll_die(value, roll.sides)
+                if once is True:
+                    break
+            new_rolls.append(value)
+        roll.rolls[-1] = new_rolls
+        logger.debug("Rolls after rerolling: %s\nResult of reroll: %s", roll.rolls[-1], roll)
+        return roll
+
 
 keep_highest = functools.partial(RolledDice.keep, highest=True)
 keep_lowest = functools.partial(RolledDice.keep, highest=False)
 
+reroll_equal = functools.partial(RolledDice.reroll, relation="=", once=False)
+reroll_more = functools.partial(RolledDice.reroll, relation=">", once=False)
+reroll_less = functools.partial(RolledDice.reroll, relation="<", once=False)
+reroll_once_equal = functools.partial(RolledDice.reroll, relation="=", once=True)
+reroll_once_more = functools.partial(RolledDice.reroll, relation=">", once=True)
+reroll_once_less = functools.partial(RolledDice.reroll, relation="<", once=True)
+
 
 def drop_highest(roll, number):
-    return RolledDice.keep(roll, len(roll.rolls[0]) - number, highest=False)
+    return keep_lowest(roll, len(roll.rolls[0]) - number)
 
 
 def drop_lowest(roll, number):
-    return RolledDice.keep(roll, len(roll.rolls[0]) - number, highest=True)
+    return keep_highest(roll, len(roll.rolls[0]) - number)
 
 
 class Operator:
@@ -203,17 +245,17 @@ class Operator:
         self.priority = priority
         self.function = function
         if (operands == 1):
-            self.operation = self.__unary
+            self.operation = self._unary
         else:
-            self.operation = self.__binary
+            self.operation = self._binary
 
-    def __unary(self, arg):
+    def _unary(self, arg):
         if ((self.function) == str(self.function)):
             return eval(self.function)
         else:
             return self.function(arg)
 
-    def __binary(self, left, right):
+    def _binary(self, left, right):
         if ((self.function) == str(self.function)):
             return eval(self.function)
         else:
@@ -241,7 +283,13 @@ class ExpressionEvaluation:
         self.roll_modifiers = {"kh": Operator(keep_highest, priority=4, operands=2),
                                "kl": Operator(keep_lowest, priority=4, operands=2),
                                "dh": Operator(drop_highest, priority=4, operands=2),
-                               "dl": Operator(drop_lowest, priority=4, operands=2) }
+                               "dl": Operator(drop_lowest, priority=4, operands=2),
+                               "r>": Operator(reroll_more, priority=4, operands=2),
+                               "r<": Operator(reroll_less, priority=4, operands=2),
+                               "r=": Operator(reroll_equal, priority=4, operands=2),
+                               "ro>": Operator(reroll_once_more, priority=4, operands=2),
+                               "ro<": Operator(reroll_once_less, priority=4, operands=2),
+                               "ro=": Operator(reroll_once_equal, priority=4, operands=2)}
 
         for oper in self.roll_modifiers:
             self.operators[oper] = self.roll_modifiers[oper]
@@ -320,6 +368,7 @@ class ExpressionEvaluation:
         expression = re.compile("(?![a-zA-Z])(.)k(?=[0-9(])").sub(r"\1kh", expression)
         expression = re.compile("d%").sub("d100", expression)
         expression = re.compile("((?=[^)0-9F]).|\A)\-").sub(r"\1_", expression)
+        expression = re.compile("(ro?(?![<>=ou]))").sub(r"\1=", expression)
         logger.debug("Preprocessed expression: %s", expression)
         return expression
 

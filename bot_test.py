@@ -57,7 +57,7 @@ class TestClass(object):
 
     def test_unknown_symbol(self):
         with pytest.raises(shuntingyard.UnknownSymbol):
-            tested("2d6 + abs(argh)")
+            tested("2d6 + round(roo)")
 
     def test_empty_stack(self):
         with pytest.raises(shuntingyard.StackIsEmpty):
@@ -110,3 +110,19 @@ class TestClass(object):
     def test_roll_modifier_misuse(self):
         with pytest.raises(shuntingyard.RollModifierMisuse):
             tested("(3d6+2)k2")
+
+    def test_reroll(self):
+        result = tested("100d6r5").result
+        assert 5 not in result.rolls[0]
+
+    def test_reroll_2(self):
+        result = tested("100d8r>5").result
+        assert not [roll for roll in result.rolls[0] if roll > 5]
+
+    def test_reroll_3(self):
+        result = tested("100d6r<3").result
+        assert not [roll for roll in result.rolls[0] if roll < 3]
+
+    def test_reroll_4(self):
+        result = tested("100dFr=-1").result
+        assert -1 not in result.rolls[0]
