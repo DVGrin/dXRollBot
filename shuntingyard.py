@@ -45,6 +45,10 @@ class RollModifierMisuse(Exception):
     '''The user tried to apply roll modifier to something that is not a roll'''
 
 
+class IncorrectArgumentCount(Exception):
+    '''Wrong number of arguments passed to the operator'''
+
+
 class RolledDice:
     '''Class that simulates a dice roll and holds all the information about it to allow arithmetics'''
     def __init__(self, number, sides):
@@ -240,26 +244,14 @@ def drop_lowest(roll, number):
 
 class Operator:
     def __init__(self, function, priority=0, operands=2):
-        assert((operands == 1) or (operands == 2))
         self.operands = operands
         self.priority = priority
         self.function = function
-        if (operands == 1):
-            self.operation = self._unary
-        else:
-            self.operation = self._binary
 
-    def _unary(self, arg):
-        if ((self.function) == str(self.function)):
-            return eval(self.function)
-        else:
-            return self.function(arg)
-
-    def _binary(self, left, right):
-        if ((self.function) == str(self.function)):
-            return eval(self.function)
-        else:
-            return self.function(left, right)
+    def operation(self, args):
+        if len(tuple(args)) != self.operands:
+            raise IncorrectArgumentCount(f"Operation: {self.operation}, arguments: {tuple(args)}")
+        return self.function(*args)
 
 
 class ExpressionEvaluation:
@@ -301,16 +293,18 @@ class ExpressionEvaluation:
             logger.info("The result of evaluation: %s", self.result)
             if isinstance(self.result, RolledDice):
                 logger.info("Rolls made: %s", self.result.rolls)
-                logger.info("Rolls dropped: %s", self.result.dropped_rolls)
-                logger.info("Additional rolls made: %s", self.result.additional_rolls)
+                if self.result.dropped_rolls != [[]]:
+                    logger.info("Rolls dropped: %s", self.result.dropped_rolls)
+                if self.result.additional_rolls != [[]]:
+                    logger.info("Additional rolls made: %s", self.result.additional_rolls)
         except Exception as e:
             logger.info("Raised exception %r for expression '%s'", e, expression)
             raise e
 
     def _is_operand(self, token):
+        if token == "F":
+            return True
         try:
-            if token == "F":
-                return True
             float(token)
             return True
         except ValueError:
@@ -330,28 +324,19 @@ class ExpressionEvaluation:
 
     def _apply_operator(self, operators, values):
         oper = operators.pop()
-        if (self._peek(values) is None):
-            logger.debug("Raised StackIsEmpty exception for values while applying operator '%s', stack: %s", oper, values)
-            raise StackIsEmpty(oper)
-        right = values.pop()
         if oper not in self.operators:
-            logger.critical("Trying to apply unknown operator '%s'", oper)
+            logger.error("Trying to apply unknown operator '%s'", oper)
             raise ValueError(f"Unknown operator: {oper}")
-        if self.operators[oper].operands == 2:
+        args = []
+        for i in range(self.operators[oper].operands):
             if (self._peek(values) is None):
                 logger.debug("Raised StackIsEmpty exception for values while applying operator '%s', stack: %s", oper, values)
                 raise StackIsEmpty(oper)
-            left = values.pop()
-            self._roll_modifier_legality(oper, left)
-            logger.debug("Applying operator '%s' to values (%s, %s)", oper, left, right)
-            values.append(self.operators[oper].operation(left, right))
-        elif self.operators[oper].operands == 1:
-            self._roll_modifier_legality(oper, right)
-            logger.debug("Applying operator '%s' to value %s", oper, right)
-            values.append(self.operators[oper].operation(right))
-        else:
-            logger.critical("Raised ValueError exception for operator %s with %s operands", oper, oper.operands)
-            raise ValueError(f"The operator {oper} had {oper.operands} operands")
+            args.append(values.pop())
+        self._roll_modifier_legality(oper, args[-1])
+        args.reverse()
+        logger.debug("Applying operator '%s' to values %s", oper, args)
+        values.append(self.operators[oper].operation(args))
 
     def _apply_function(self, operators, values):
         function = operators.pop()
@@ -365,12 +350,15 @@ class ExpressionEvaluation:
     def _preprocess_expression(self, expression):
         expression = re.compile("\s").sub("", expression)
         expression = re.compile("\*\*").sub("^", expression)
-        expression = re.compile("(?![a-zA-Z])(.)k(?=[0-9(])").sub(r"\1kh", expression)
         expression = re.compile("d%").sub("d100", expression)
-        expression = re.compile("((?=[^)0-9F]).|\A)\-").sub(r"\1_", expression)
-        expression = re.compile("(ro?(?![<>=ou]))").sub(r"\1=", expression)
         logger.debug("Preprocessed expression: %s", expression)
         return expression
+
+    def _preprocess_token(self, token):
+        token = re.compile("k(?=[0-9(])").sub("kh", token)
+        token = re.compile("((?=[^)0-9F]).|\A)\-").sub(r"\1_", token)
+        token = re.compile("(ro?(?![<>=]))").sub(r"\1=", token)
+        return token
 
     def _divide_expression(self, expression):
         func_tokens, op_tokens, tokens = '(', '', []
@@ -387,14 +375,13 @@ class ExpressionEvaluation:
         op_tokens = op_tokens[:-1]
         for token in func_tokens:
             if token not in self.functions:
+                token = self._preprocess_token(token)
                 token = re.split("(" + op_tokens + "|\(|\))", token)
             if (isinstance(token, list)):
                 tokens += token
             else:
                 tokens.append(token)
-        for token in tokens:
-            if not token:
-                tokens.remove(token)
+        tokens = [token for token in tokens if token]
         logger.debug("Divided expression: %s", tokens)
         return tokens
 

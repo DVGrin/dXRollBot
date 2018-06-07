@@ -3,10 +3,14 @@ import time
 import telepot
 import telepot.loop
 import re
+import logging
 
 import shuntingyard
 
 # telepot.api.set_proxy("http://proxy.url")
+
+logging.basicConfig(format="%(levelname)-8s (%(asctime)s) %(message)s", level=logging.DEBUG, datefmt="%d.%m.%y, %H:%M:%S")
+logger = logging.getLogger(__name__)
 
 
 class dXRollBot:
@@ -18,27 +22,24 @@ class dXRollBot:
                          "roll": self._roll,
                          "r": self._roll}
         telepot.loop.MessageLoop(self.bot, {'chat': self.on_chat_message}).run_as_thread()
-        print('Started listening...')
+        logger.info('Started listening...')
         while 1:
             time.sleep(10)
 
     def _help(self, chat_id, topic=''):
         with open("helpfile.txt", "r") as f:
-            if not topic:
-                for line in f:
-                    if line[0] == "[":
+            print_flag = not topic
+            help_message = ""
+            for line in f:
+                if line == f"[{topic}]\n":
+                    print_flag = True
+                    continue
+                if print_flag:
+                    if (line[0] == "["):
                         break
-                    print(line)
-            else:
-                print_flag = False
-                for line in f:
-                    if line == f"[{topic}]":
-                        print_flag = True
-                        continue
-                    if print_flag:
-                        if (line[0] == "["):
-                            break
-                    print(line)
+                    help_message += line
+        self.sent_message = self.bot.sendMessage(chat_id, help_message, parse_mode='Markdown')
+        logger.info('Sent help message: "%s"', self.sent_message['text'])
 
     def _roll(self, chat_id, query):
         error_message = ""
@@ -54,16 +55,20 @@ class dXRollBot:
             error_message = "Error: " + exc
         except shuntingyard.KeepValueError as exc:
             error_message = "Error: " + exc
+        except shuntingyard.RerollValueError as exc:
+            error_message = "Error: " + exc
         except shuntingyard.MismatchedBrackets as exc:
             error_message = "Error: There was a mismatched bracket in the expression"
         except shuntingyard.EmptyExpression:
             error_message = "Error: No expression was given"
+        except shuntingyard.RollModifierMisuse as exc:
+            error_message = "Error: " + exc
         except ZeroDivisionError:
             error_message = "Error: There was an attempt to divide by zero"
         finally:
             if error_message:
                 self.sent_message = self.bot.sendMessage(chat_id, error_message, parse_mode='Markdown')
-                print(f"Sent exception message: \"{self.sent_message['text']}\"")
+                logger.info('Sent exception message: "%s"', self.sent_message['text'])
                 return False
         new_text = f'```\n{query} = {result}```'
         if (len(new_text) >= 4095):
@@ -72,7 +77,7 @@ class dXRollBot:
             else:
                 new_text = "Error: The message is too long to display"
         self.sent_message = self.bot.sendMessage(chat_id, new_text, parse_mode='Markdown')
-        print(f"Sent message: \"{self.sent_message['text']}\"")
+        logger.info('Sent message: "%s"', self.sent_message['text'])
         return True
 
     def _parse_command(self, message):
@@ -87,16 +92,16 @@ class dXRollBot:
         else:
             error_message = f"Unrecognized command: \"{command[1]}\""
             self.sent_message = self.bot.sendMessage(chat_id, error_message, parse_mode='Markdown')
-            print(f"Sent message: \"{self.sent_message['text']}\"")
+            logger.info('Sent error message: "%s"', self.sent_message['text'])
         return command[1]
 
     def on_chat_message(self, message):
         content_type, chat_type, chat_id = telepot.glance(message)
         if (content_type == 'text'):
-            print(f'Received text message: \"{message["text"]}\" from {chat_type} chat, id {chat_id}')
+            logger.info('Received text message: "%s" from %s chat, id %s', message["text"], chat_type, chat_id)
             self._parse_command(message)
         else:
-            print(f'Received non-text ({content_type}) message from {chat_type} chat, id {chat_id}')
+            logger.info('Received non-text (%s) message from %s chat, id %s', content_type, chat_type, chat_id)
 
 
 dXRollBot(sys.argv[1])
