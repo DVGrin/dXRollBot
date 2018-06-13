@@ -126,3 +126,19 @@ class TestClass(object):
     def test_reroll_4(self):
         result = tested("100dFr=-1").result
         assert -1 not in result.rolls[0]
+
+    def test_exploding_dice(self):
+        result = tested("100d6!").result
+        assert len(result.rolls[0]) == 100 + len([x for x in result.rolls[0] if x == 6])
+
+    def test_exploding_dice_2(self):
+        result = tested("100d6!=3").result
+        assert len(result.rolls[0]) == 100 + len([x for x in result.rolls[0] if x == 3])
+
+    def test_exploding_dice_3(self):
+        result = tested("100d6!>4").result
+        assert len(result.rolls[0]) == 100 + len([x for x in result.rolls[0] if x > 4])
+
+    def test_exploding_dice_4(self):
+        result = tested("100d6!< 3").result
+        assert len(result.rolls[0]) == 100 + len([x for x in result.rolls[0] if x < 3])

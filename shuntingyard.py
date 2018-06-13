@@ -9,7 +9,7 @@ import functools
 
 # import timeout
 
-logging.basicConfig(format="%(levelname)-8s (%(asctime)s) %(message)s", level=logging.DEBUG, datefmt="%d.%m.%y, %H:%M:%S")
+logging.basicConfig(format="%(levelname)-8s (%(asctime)s) %(message)s", level=logging.INFO, datefmt="%d.%m.%y, %H:%M:%S")
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +31,10 @@ class KeepValueError(Exception):
 
 class RerollValueError(Exception):
     '''The target number for reroll was wrong'''
+
+
+class ExplodeValueError(Exception):
+    '''The target number for exploding dice was wrong'''
 
 
 class MismatchedBrackets(Exception):
@@ -73,7 +77,7 @@ class RolledDice:
             logger.debug("Raised NegativeRollMeasurements exception, number of dice = %s", self.number)
             raise NegativeRollMeasurements(f"Cannot roll negative number of dice: {self.number}")
         self.sum = self._roll_dice()
-        self.__finished = False
+        self.finished = False
         logger.debug("Initialized %s(number=%s, sides=%s, rolls=%s, sum=%s) instance", type(self).__name__, self.number, self.sides, self.rolls, self.sum)
 
     @property
@@ -83,14 +87,6 @@ class RolledDice:
     @property
     def sides(self):
         return self.__sides
-
-    @property
-    def finished(self):
-        return self.__finished
-
-    def set_finished(self, value):
-        if isinstance(value, bool):
-            self.__finished = value
 
 #    def __repr__(self):
 #        return f"{type(self).__name__}({self.number}, " + repr(self.sides) + f", {self.rolls}, {self.dropped_rolls}, {self.additional_rolls}, {self.sum})"
@@ -197,7 +193,7 @@ class RolledDice:
 
     @staticmethod
     def reroll(roll, target, *, relation, once=False):
-        def reroll_die(die, sides):
+        def reroll_die(sides):
             if sides == "F":
                 return random.randint(-1, 1)
             else:
@@ -208,18 +204,41 @@ class RolledDice:
             target = int(target)
         except ValueError:
             logger.debug("Raised RerollValueError: couldn't convert %s to int", target)
-            raise RerollValueError(f"Number of dice to reroll ({target}) has to be a number")
+            raise RerollValueError(f"Number of dice to reroll ({str(target)}) has to be a number")
         logger.debug("Rolls before rerolling: %s", roll.rolls)
         relations = {">": operator.gt, "<": operator.lt, "=": operator.eq}
         new_rolls = []
         for value in roll.rolls[-1]:
             while relations[relation](value, target):
-                value = reroll_die(value, roll.sides)
+                value = reroll_die(roll.sides)
                 if once is True:
                     break
             new_rolls.append(value)
         roll.rolls[-1] = new_rolls
         logger.debug("Rolls after rerolling: %s\nResult of reroll: %s", roll.rolls[-1], roll)
+        return roll
+
+    @staticmethod
+    def explode(roll, target, *, relation, special=None):
+        def roll_die(sides):
+            if sides == "F":
+                return random.randint(-1, 1)
+            else:
+                return random.randint(1, sides)
+
+        logger.debug("Exploding dice for %s, target is %s%s, special modifier is %s", roll, relation, target, special)
+        try:
+            if target != "F":
+                target = int(target)
+        except ValueError:
+            logger.debug("Raised ExplodeValueError: couldn't convert %s to int", target)
+            raise ExplodeValueError(f"Target number for exploding dice ({str(target)}) has to be a number (or 'F' for Fate dice)")
+        logger.debug("Rolls before exploding: %s", roll.rolls)
+        relations = {">": operator.gt, "<": operator.lt, "=": operator.eq}
+        for value in roll.rolls[-1]:
+            if relations[relation](value, target):
+                roll.rolls[-1].append(roll_die(roll.sides))
+        logger.debug("Rolls after exploding: %s\nResult of exploding: %s", roll.rolls[-1], roll)
         return roll
 
 
@@ -232,6 +251,9 @@ reroll_less = functools.partial(RolledDice.reroll, relation="<", once=False)
 reroll_once_equal = functools.partial(RolledDice.reroll, relation="=", once=True)
 reroll_once_more = functools.partial(RolledDice.reroll, relation=">", once=True)
 reroll_once_less = functools.partial(RolledDice.reroll, relation="<", once=True)
+explode_equal = functools.partial(RolledDice.explode, relation="=")
+explode_more = functools.partial(RolledDice.explode, relation=">")
+explode_less = functools.partial(RolledDice.explode, relation="<")
 
 
 def drop_highest(roll, number):
@@ -242,6 +264,10 @@ def drop_lowest(roll, number):
     return keep_highest(roll, len(roll.rolls[0]) - number)
 
 
+def explode(roll):
+    return RolledDice.explode(roll, roll.sides, relation="=")
+
+
 class Operator:
     def __init__(self, function, priority=0, operands=2):
         self.operands = operands
@@ -250,6 +276,7 @@ class Operator:
 
     def operation(self, args):
         if len(tuple(args)) != self.operands:
+            logger.error("Incorrect argument count for operator '%s': %s", self.function, tuple(args))
             raise IncorrectArgumentCount(f"Operation: {self.operation}, arguments: {tuple(args)}")
         return self.function(*args)
 
@@ -272,16 +299,23 @@ class ExpressionEvaluation:
                           "d": Operator(RolledDice, priority=5, operands=2),
                           "_": Operator(operator.neg, priority=10, operands=1) }
 
-        self.roll_modifiers = {"kh": Operator(keep_highest, priority=4, operands=2),
+        self.roll_modifiers = {"k": Operator(keep_highest, priority=4, operands=2),
+                               "kh": Operator(keep_highest, priority=4, operands=2),
                                "kl": Operator(keep_lowest, priority=4, operands=2),
                                "dh": Operator(drop_highest, priority=4, operands=2),
                                "dl": Operator(drop_lowest, priority=4, operands=2),
+                               "r": Operator(reroll_equal, priority=4, operands=2),
+                               "r=": Operator(reroll_equal, priority=4, operands=2),
                                "r>": Operator(reroll_more, priority=4, operands=2),
                                "r<": Operator(reroll_less, priority=4, operands=2),
-                               "r=": Operator(reroll_equal, priority=4, operands=2),
+                               "ro": Operator(reroll_once_equal, priority=4, operands=2),
+                               "ro=": Operator(reroll_once_equal, priority=4, operands=2),
                                "ro>": Operator(reroll_once_more, priority=4, operands=2),
                                "ro<": Operator(reroll_once_less, priority=4, operands=2),
-                               "ro=": Operator(reroll_once_equal, priority=4, operands=2)}
+                               "!": Operator(explode, priority=4, operands=1),
+                               "!=": Operator(explode_equal, priority=4, operands=2),
+                               "!>": Operator(explode_more, priority=4, operands=2),
+                               "!<": Operator(explode_less, priority=4, operands=2), }
 
         for oper in self.roll_modifiers:
             self.operators[oper] = self.roll_modifiers[oper]
@@ -319,8 +353,8 @@ class ExpressionEvaluation:
                 logger.debug("Raised RollModifierMisuse exception while applying roll modifier '%s' to non-roll value '%s'", oper, value)
                 raise RollModifierMisuse(f"Tried to apply roll modifier to something that is not a roll: {value}")
         elif isinstance(value, RolledDice):
-            value.set_finished(True)
-            logger.debug("Changed finished attribute to %s", value.finished)
+            value.finished = True
+            logger.debug("Changed 'finished' attribute of %s to %s", value, value.finished)
 
     def _apply_operator(self, operators, values):
         oper = operators.pop()
@@ -351,17 +385,12 @@ class ExpressionEvaluation:
         expression = re.compile("\s").sub("", expression)
         expression = re.compile("\*\*").sub("^", expression)
         expression = re.compile("d%").sub("d100", expression)
+        expression = re.compile("((?=[^)0-9F]).|\A)\-").sub(r"\1_", expression)  # Change unary minus to _
         logger.debug("Preprocessed expression: %s", expression)
         return expression
 
-    def _preprocess_token(self, token):
-        token = re.compile("k(?=[0-9(])").sub("kh", token)
-        token = re.compile("((?=[^)0-9F]).|\A)\-").sub(r"\1_", token)
-        token = re.compile("(ro?(?![<>=]))").sub(r"\1=", token)
-        return token
-
     def _divide_expression(self, expression):
-        func_tokens, op_tokens, tokens = '(', '', []
+        func_tokens, op_tokens, tokens = '(', '(', []
         for function in self.functions:
             func_tokens += function + '|'
         func_tokens = func_tokens[:-1] + ')'
@@ -369,19 +398,23 @@ class ExpressionEvaluation:
         for oper in self.operators:
             if oper in '.^$*+?{}[]|-\\':
                 oper = '\\' + str(oper)
-            if oper == "d":
-                oper = "d(?![hl])"
+            elif oper == "d":
+                oper = "d(?=[0-9(F])"
+            elif oper == "!":
+                oper = "!(?![!><=p])"
+            else:
+                for oper2 in self.operators:
+                    if oper in oper2 and oper != oper2 and self.operators[oper].operands > 1:
+                        oper = oper + "(?=[0-9(])"
             op_tokens += oper + "|"
-        op_tokens = op_tokens[:-1]
+        op_tokens = op_tokens[:-1] + "|\(|\))"
         for token in func_tokens:
             if token not in self.functions:
-                token = self._preprocess_token(token)
-                token = re.split("(" + op_tokens + "|\(|\))", token)
+                token = re.split(op_tokens, token)
             if (isinstance(token, list)):
-                tokens += token
+                tokens += [tok for tok in token if tok]
             else:
                 tokens.append(token)
-        tokens = [token for token in tokens if token]
         logger.debug("Divided expression: %s", tokens)
         return tokens
 
@@ -419,7 +452,7 @@ class ExpressionEvaluation:
                     if self._peek(operators) in self.functions:
                         self._apply_function(operators, values)
                 logger.debug("Finished closing bracket handling. Values: %s, Operators: %s", values, operators)
-            elif token in self.operators:  # Operator or roll modifier
+            elif token in self.operators:
                 logger.debug("Met an operator: '%s'", token)
                 top = self._peek(operators)
                 while top is not None and top not in "()" and self._greater_precedence(top, token):
