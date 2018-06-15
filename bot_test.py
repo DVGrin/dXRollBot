@@ -112,33 +112,57 @@ class TestClass(object):
             tested("(3d6+2)k2")
 
     def test_reroll(self):
-        result = tested("100d6r5").result
+        result = tested("1000d6r5").result
         assert 5 not in result.rolls[0]
 
     def test_reroll_2(self):
-        result = tested("100d8r>5").result
+        result = tested("1000d8r>5").result
         assert not [roll for roll in result.rolls[0] if roll > 5]
 
     def test_reroll_3(self):
-        result = tested("100d6r<3").result
+        result = tested("1000d6r<3").result
         assert not [roll for roll in result.rolls[0] if roll < 3]
 
     def test_reroll_4(self):
-        result = tested("100dFr=-1").result
+        result = tested("1000dFr=-1").result
         assert -1 not in result.rolls[0]
 
     def test_exploding_dice(self):
-        result = tested("100d6!").result
-        assert len(result.rolls[0]) == 100 + len([x for x in result.rolls[0] if x == 6])
+        result = tested("1000d6!").result
+        assert len(result.rolls[0]) == 1000 + len([x for x in result.rolls[0] if x == 6])
 
     def test_exploding_dice_2(self):
-        result = tested("100d6!=3").result
-        assert len(result.rolls[0]) == 100 + len([x for x in result.rolls[0] if x == 3])
+        result = tested("1000d6!=3").result
+        assert len(result.rolls[0]) == 1000 + len([x for x in result.rolls[0] if x == 3])
 
     def test_exploding_dice_3(self):
-        result = tested("100d6!>4").result
-        assert len(result.rolls[0]) == 100 + len([x for x in result.rolls[0] if x > 4])
+        result = tested("1000d6!>4").result
+        assert len(result.rolls[0]) == 1000 + len([x for x in result.rolls[0] if x > 4])
 
     def test_exploding_dice_4(self):
-        result = tested("100d6!< 3").result
-        assert len(result.rolls[0]) == 100 + len([x for x in result.rolls[0] if x < 3])
+        result = tested("1000d6!< 3").result
+        assert len(result.rolls[0]) == 1000 + len([x for x in result.rolls[0] if x < 3])
+
+    def test_compounding_exploding_dice(self):
+        result = tested("1000d6!!").result
+        for x, y in zip([x for x in result.rolls[0]], [x for x in result.additional_rolls[0]]):
+            if y > 0:
+                assert x - y == 6
+
+    def test_compounding_exploding_dice_2(self):
+        result = tested("1000d6!!=3").result
+        for x, y in zip([x for x in result.rolls[0]], [x for x in result.additional_rolls[0]]):
+            if y > 0:
+                assert x - y == 3
+
+    def test_compounding_exploding_dice_3(self):
+        result = tested("1000d6!!>4").result
+        for x, y in zip([x for x in result.rolls[0]], [x for x in result.additional_rolls[0]]):
+            if y > 0:
+                assert x - y > 4
+
+    def test_compounding_exploding_dice_4(self):
+        result = tested("1000d6!!< 3").result
+        for x, y in zip([x for x in result.rolls[0]], [x for x in result.additional_rolls[0]]):
+            if y > 0:
+                assert x - y < 3

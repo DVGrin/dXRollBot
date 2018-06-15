@@ -235,11 +235,35 @@ class RolledDice:
             raise ExplodeValueError(f"Target number for exploding dice ({str(target)}) has to be a number (or 'F' for Fate dice)")
         logger.debug("Rolls before exploding: %s", roll.rolls)
         relations = {">": operator.gt, "<": operator.lt, "=": operator.eq}
-        for value in roll.rolls[-1]:
-            if relations[relation](value, target):
-                roll.rolls[-1].append(roll_die(roll.sides))
+        if special == "Compounding":
+            new_rolls = []
+            for value in roll.rolls[-1]:
+                new_value = new_roll = value
+                while relations[relation](new_roll, target):
+                    new_roll = roll_die(roll.sides)
+                    new_value += new_roll
+                new_rolls.append(new_value)
+                roll.additional_rolls[-1].append(new_value - value)
+            roll.rolls[-1] = new_rolls
+        elif special is None:
+            for value in roll.rolls[-1]:
+                if relations[relation](value, target):
+                    roll.additional_rolls[-1].append(roll_die(roll.sides))
+                    roll.rolls[-1].append(roll_die(roll.sides))
         logger.debug("Rolls after exploding: %s\nResult of exploding: %s", roll.rolls[-1], roll)
         return roll
+
+
+def drop_highest(roll, number):
+    return keep_lowest(roll, len(roll.rolls[0]) - number)
+
+
+def drop_lowest(roll, number):
+    return keep_highest(roll, len(roll.rolls[0]) - number)
+
+
+def explode(roll, new_special=None):
+    return RolledDice.explode(roll, roll.sides, relation="=", special=new_special)
 
 
 keep_highest = functools.partial(RolledDice.keep, highest=True)
@@ -251,21 +275,14 @@ reroll_less = functools.partial(RolledDice.reroll, relation="<", once=False)
 reroll_once_equal = functools.partial(RolledDice.reroll, relation="=", once=True)
 reroll_once_more = functools.partial(RolledDice.reroll, relation=">", once=True)
 reroll_once_less = functools.partial(RolledDice.reroll, relation="<", once=True)
+
 explode_equal = functools.partial(RolledDice.explode, relation="=")
 explode_more = functools.partial(RolledDice.explode, relation=">")
 explode_less = functools.partial(RolledDice.explode, relation="<")
-
-
-def drop_highest(roll, number):
-    return keep_lowest(roll, len(roll.rolls[0]) - number)
-
-
-def drop_lowest(roll, number):
-    return keep_highest(roll, len(roll.rolls[0]) - number)
-
-
-def explode(roll):
-    return RolledDice.explode(roll, roll.sides, relation="=")
+explode_compounding = functools.partial(explode, new_special="Compounding")
+explode_compounding_equal = functools.partial(explode_equal, special="Compounding")
+explode_compounding_more = functools.partial(explode_more, special="Compounding")
+explode_compounding_less = functools.partial(explode_less, special="Compounding")
 
 
 class Operator:
@@ -315,7 +332,11 @@ class ExpressionEvaluation:
                                "!": Operator(explode, priority=4, operands=1),
                                "!=": Operator(explode_equal, priority=4, operands=2),
                                "!>": Operator(explode_more, priority=4, operands=2),
-                               "!<": Operator(explode_less, priority=4, operands=2), }
+                               "!<": Operator(explode_less, priority=4, operands=2),
+                               "!!": Operator(explode_compounding, priority=4, operands=1),
+                               "!!=": Operator(explode_compounding_equal, priority=4, operands=2),
+                               "!!>": Operator(explode_compounding_more, priority=4, operands=2),
+                               "!!<": Operator(explode_compounding_less, priority=4, operands=2) }
 
         for oper in self.roll_modifiers:
             self.operators[oper] = self.roll_modifiers[oper]
@@ -385,6 +406,8 @@ class ExpressionEvaluation:
         expression = re.compile("\s").sub("", expression)
         expression = re.compile("\*\*").sub("^", expression)
         expression = re.compile("d%").sub("d100", expression)
+        if "_" in expression:
+            raise UnknownSymbol("_")
         expression = re.compile("((?=[^)0-9F]).|\A)\-").sub(r"\1_", expression)  # Change unary minus to _
         logger.debug("Preprocessed expression: %s", expression)
         return expression
@@ -400,12 +423,12 @@ class ExpressionEvaluation:
                 oper = '\\' + str(oper)
             elif oper == "d":
                 oper = "d(?=[0-9(F])"
-            elif oper == "!":
-                oper = "!(?![!><=p])"
+            elif oper == "!" or oper == "!!":
+                oper += "(?![!><=p])"
             else:
                 for oper2 in self.operators:
                     if oper in oper2 and oper != oper2 and self.operators[oper].operands > 1:
-                        oper = oper + "(?=[0-9(])"
+                        oper += "(?=[0-9(])"
             op_tokens += oper + "|"
         op_tokens = op_tokens[:-1] + "|\(|\))"
         for token in func_tokens:
